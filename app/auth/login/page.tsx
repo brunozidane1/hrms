@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -14,31 +14,60 @@ import {
   ShieldCheck, 
   ChevronLeft 
 } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { ApiClientError } from '@/lib/api-client';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login, isAuthenticated, isInitializing } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [stage, setStage] = useState<'identify' | 'authorize'>('identify');
-  const [formData, setFormData] = useState({ email: '', password: '' });
+  const [error, setError] = useState('');
+  const [formData, setFormData] = useState({ company_slug: '', email: '', password: '' });
 
   const handleIdentify = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      setStage('authorize');
-    }, 800);
+    setError('');
+
+    if (!formData.company_slug.trim()) {
+      setError('Company slug is required.');
+      return;
+    }
+
+    setStage('authorize');
   };
 
-  const handleFinalLogin = (e: React.FormEvent) => {
+  const handleFinalLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     setIsLoading(true);
-    setTimeout(() => {
-      const isHR = formData.email.includes('admin') || formData.email.includes('hr');
-      router.push(isHR ? '/hrms/dashboard' : '/hrms/self-service/dashboard');
-    }, 1200);
+
+    try {
+      await login({
+        company_slug: formData.company_slug.trim(),
+        email: formData.email.trim(),
+        password: formData.password
+      });
+      router.push('/hrms/dashboard');
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setError(err.message);
+      } else {
+        setError('Login failed. Please try again.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  useEffect(() => {
+    if (!isInitializing && isAuthenticated) {
+      router.replace('/hrms/dashboard');
+    }
+  }, [isAuthenticated, isInitializing, router]);
+
+  if (!isInitializing && isAuthenticated) return null;
 
   return (
     <div className="fun-page min-h-screen bg-slate-50 flex items-center justify-center p-0 lg:p-8 font-sans">
@@ -70,6 +99,20 @@ export default function LoginPage() {
 
                 <form onSubmit={handleIdentify} className="space-y-5">
                   <div className="space-y-2">
+                    <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Company Slug</label>
+                    <div className="relative group">
+                      <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
+                      <input 
+                        type="text" 
+                        required
+                        placeholder="acme-inc"
+                        value={formData.company_slug}
+                        onChange={(e) => setFormData({...formData, company_slug: e.target.value})}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-12 pr-4 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
                     <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Email Address</label>
                     <div className="relative group">
                       <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
@@ -86,6 +129,7 @@ export default function LoginPage() {
                   <button className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-[0.98]">
                     {isLoading ? <Loader2 className="animate-spin" size={20} /> : <>Continue <ArrowRight size={18} /></>}
                   </button>
+                  {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
                 </form>
 
                 <div className="text-center space-y-3 mt-6">
@@ -134,6 +178,7 @@ export default function LoginPage() {
                   <button className="w-full bg-blue-600 text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 active:scale-[0.98]">
                     {isLoading ? <Loader2 className="animate-spin" size={20} /> : "Log In"}
                   </button>
+                  {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
                 </form>
               </div>
             )}

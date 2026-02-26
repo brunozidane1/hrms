@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
@@ -13,36 +13,75 @@ import {
   ChevronRight, 
   ChevronLeft,
   CheckCircle2,
-  Fingerprint,
-  Building2
+  Fingerprint
 } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
+import { ApiClientError } from '@/lib/api-client';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { register, isAuthenticated, isInitializing } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [step, setStep] = useState(1);
+  const [error, setError] = useState('');
   const [formData, setFormData] = useState({
+    companySlug: '',
+    roleId: '',
     fullName: '',
     email: '',
     password: '',
-    confirmPassword: '',
-    department: ''
+    confirmPassword: ''
   });
 
-  const nextStep = () => setStep(s => s + 1);
+  const nextStep = () => {
+    setError('');
+    if (!formData.companySlug.trim() || !formData.fullName.trim() || !formData.email.trim()) {
+      setError('Company slug, full name, and email are required.');
+      return;
+    }
+    setStep(s => s + 1);
+  };
   const prevStep = () => setStep(s => s - 1);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
+
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
     setIsLoading(true);
-    
-    // Simulate API registration delay
-    setTimeout(() => {
+
+    try {
+      await register({
+        company_slug: formData.companySlug.trim(),
+        role_id: formData.roleId.trim(),
+        full_name: formData.fullName.trim(),
+        email: formData.email.trim(),
+        password: formData.password
+      });
+      router.push('/hrms/dashboard');
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setError(err.message);
+      } else {
+        setError('Registration failed. Please verify your details.');
+      }
+    } finally {
       setIsLoading(false);
-      router.push('/auth/login');
-    }, 2000);
+    }
   };
+
+  useEffect(() => {
+    if (!isInitializing && isAuthenticated) {
+      router.replace('/hrms/dashboard');
+    }
+  }, [isAuthenticated, isInitializing, router]);
+
+  if (!isInitializing && isAuthenticated) return null;
 
   return (
     <div className="fun-page min-h-screen bg-slate-50 flex items-center justify-center p-0 lg:p-8 font-sans">
@@ -81,6 +120,16 @@ export default function RegisterPage() {
                   </header>
 
                   <div className="space-y-4">
+                    <InputGroup label="Company Slug" icon={<CheckCircle2 size={18}/>}>
+                      <input 
+                        required
+                        type="text"
+                        placeholder="acme-inc"
+                        value={formData.companySlug}
+                        onChange={(e) => setFormData({...formData, companySlug: e.target.value})}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-12 pr-4 text-slate-900 focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all"
+                      />
+                    </InputGroup>
                     <InputGroup label="Full Name" icon={<User size={18}/>}>
                       <input 
                         required
@@ -111,6 +160,7 @@ export default function RegisterPage() {
                   >
                     Next Step <ChevronRight size={18} />
                   </button>
+                  {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
                 </div>
               ) : (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-500 space-y-5">
@@ -123,6 +173,16 @@ export default function RegisterPage() {
                   </header>
 
                   <div className="space-y-4">
+                    <InputGroup label="Role ID (UUID)" icon={<CheckCircle2 size={18}/>}>
+                      <input 
+                        required
+                        type="text"
+                        placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                        value={formData.roleId}
+                        onChange={(e) => setFormData({...formData, roleId: e.target.value})}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3.5 pl-12 pr-4 text-slate-900 focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-100 outline-none transition-all"
+                      />
+                    </InputGroup>
                     <div className="relative group">
                       <Lock className="absolute left-4 top-11.5 text-slate-400 group-focus-within:text-blue-600 transition-colors" size={18} />
                       <InputGroup label="Password">
@@ -159,6 +219,7 @@ export default function RegisterPage() {
                   >
                     {isLoading ? <Loader2 className="animate-spin" /> : "Complete Registration"}
                   </button>
+                  {error ? <p className="text-xs font-semibold text-rose-600">{error}</p> : null}
                 </div>
               )}
             </form>

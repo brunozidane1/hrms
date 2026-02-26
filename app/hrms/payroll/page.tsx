@@ -11,10 +11,44 @@ import {
   ChevronRight,
   CreditCard,
   AlertCircle,
-  TrendingUp
+  TrendingUp,
+  Loader2,
+  CheckCircle
 } from 'lucide-react';
+import { ApiClientError } from '@/lib/api-client';
+import { payrollService } from '@/lib/services/payroll';
 
 export default function PayrollHome() {
+  const [isRunning, setIsRunning] = React.useState(false);
+  const [error, setError] = React.useState('');
+  const [success, setSuccess] = React.useState('');
+
+  const runPayrollNow = async () => {
+    setError('');
+    setSuccess('');
+    setIsRunning(true);
+    try {
+      const periods = await payrollService.listPeriods({ page: 1, limit: 1, status: 'OPEN' });
+      const openPeriod = periods.data[0];
+      if (!openPeriod) {
+        setError('No OPEN payroll period found. Create one first in Payroll Run page.');
+        return;
+      }
+      await payrollService.runPayroll(openPeriod.id);
+      setSuccess(`Payroll run started for period: ${openPeriod.name}.`);
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setError(err.message);
+      } else if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to run payroll.');
+      }
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
   const payrollModules = [
     { 
       title: "Payroll Dashboard", 
@@ -56,6 +90,8 @@ export default function PayrollHome() {
 
   return (
     <div className="fun-page p-8 max-w-350 mx-auto animate-in fade-in duration-700">
+      {error ? <p className="mb-4 inline-flex items-center gap-2 text-sm text-rose-600"><AlertCircle size={16} /> {error}</p> : null}
+      {success ? <p className="mb-4 inline-flex items-center gap-2 text-sm text-emerald-600"><CheckCircle size={16} /> {success}</p> : null}
       
       {/* Financial Status Header */}
       <div className="flex flex-col xl:flex-row gap-8 mb-12">
@@ -96,11 +132,16 @@ export default function PayrollHome() {
             <p className="text-slate-400 text-sm leading-relaxed mb-8">
               System has captured all attendance and reimbursement data. Ready for verification.
             </p>
-            <a 
-              href="/hrms/payroll/run" 
-              className="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-3 shadow-lg shadow-blue-900/40"
+            <button
+              onClick={() => void runPayrollNow()}
+              disabled={isRunning}
+              className="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-3 shadow-lg shadow-blue-900/40 disabled:opacity-60"
             >
-              <PlayCircle size={20} /> Start Processing
+              {isRunning ? <Loader2 size={20} className="animate-spin" /> : <PlayCircle size={20} />}
+              {isRunning ? 'Running...' : 'Run Payroll Now'}
+            </button>
+            <a href="/hrms/payroll/run" className="mt-3 inline-flex text-xs text-slate-300 hover:text-white">
+              Open advanced payroll run page
             </a>
           </div>
           <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-blue-600/10 rounded-full blur-3xl group-hover:bg-blue-600/20 transition-all"></div>

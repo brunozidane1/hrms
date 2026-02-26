@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Header from '../components/Header';
 import Sidebar from '../components/Sidebar';
 import { Menu, X } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
 
 export default function HRMSLayout({
   children,
@@ -13,11 +14,27 @@ export default function HRMSLayout({
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const pathname = usePathname();
+  const router = useRouter();
+  const { isAuthenticated, isInitializing } = useAuth();
 
   // Close sidebar on mobile when route changes
   useEffect(() => {
     setIsSidebarOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    if (!isInitializing && !isAuthenticated) {
+      router.replace('/auth/login');
+    }
+  }, [isAuthenticated, isInitializing, router]);
+
+  if (isInitializing || !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[linear-gradient(180deg,#f8fbff,#f4f0ff,#eff9ff)]">
+        <div className="text-sm font-bold text-[rgb(84,87,98)]">Loading secure workspace...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-[linear-gradient(180deg,#f8fbff,#f4f0ff,#eff9ff)] overflow-hidden font-sans antialiased text-[rgb(47,42,67)]">

@@ -1,12 +1,11 @@
 'use client';
 
-import { 
-  Gift, 
-  Award, 
+import {
+  Award,
   Calendar,
-  Zap, 
-  ChevronRight, 
-  Filter, 
+  Zap,
+  ChevronRight,
+  Filter,
   Search,
   ArrowUpRight,
   Clock,
@@ -17,98 +16,64 @@ import {
   Sparkles,
   Target,
   Activity,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { companyService, type CompanyTimelineEvent } from '@/lib/services/company';
+import { ApiClientError } from '@/lib/api-client';
 
-type EventType = 'anniversary' | 'birthday' | 'event' | 'onboarding';
-
-type TimelineEvent = {
-  id: number;
-  type: EventType;
-  title: string;
-  user: string;
-  role: string;
-  date: string;
-  time: string;
-  impact: string;
-  location?: string;
-  attendees?: number;
-  status: 'Live' | 'Scheduled' | 'Upcoming';
-};
+type EventType = CompanyTimelineEvent['type'];
+type TimelineEvent = CompanyTimelineEvent;
 
 export default function SovereignTimeline() {
-  const events: TimelineEvent[] = [
-    {
-      id: 1,
-      type: 'anniversary',
-      title: '5 Year Work Anniversary',
-      user: 'Sarah Jenkins',
-      role: 'Senior Lead Designer',
-      date: 'TODAY',
-      time: '09:00 AM',
-      impact: 'Core Milestone',
-      attendees: 26,
-      status: 'Live',
-    },
-    {
-      id: 2,
-      type: 'birthday',
-      title: 'Birthday Celebration',
-      user: 'Marcus Chen',
-      role: 'DevOps Engineer',
-      date: 'TODAY',
-      time: '12:30 PM',
-      impact: 'Culture',
-      location: 'Lounge Area',
-      attendees: 43,
-      status: 'Scheduled',
-    },
-    {
-      id: 3,
-      type: 'event',
-      title: 'Q1 Strategy Townhall',
-      user: 'Executive Team',
-      role: 'Global Operations',
-      date: 'FEB 22, 2026',
-      time: '10:00 AM',
-      location: 'Main Theater / Zoom',
-      impact: 'Strategic',
-      attendees: 214,
-      status: 'Upcoming',
-    },
-    {
-      id: 4,
-      type: 'onboarding',
-      title: 'Batch Onboarding Kickoff',
-      user: 'People Operations',
-      role: 'HR Enablement',
-      date: 'FEB 23, 2026',
-      time: '08:30 AM',
-      location: 'Training Room 2',
-      impact: 'Enablement',
-      attendees: 18,
-      status: 'Upcoming',
-    },
-    {
-      id: 5,
-      type: 'event',
-      title: 'Leadership AMA',
-      user: 'Leadership Circle',
-      role: 'Company-wide',
-      date: 'FEB 25, 2026',
-      time: '04:30 PM',
-      location: 'Virtual Hall',
-      impact: 'Engagement',
-      attendees: 128,
-      status: 'Scheduled',
-    },
-  ];
+  const [eventsFromApi, setEventsFromApi] = useState<TimelineEvent[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
+  const [error, setError] = useState('');
 
-  const kpis = [
-    { label: 'Events Today', value: '12', sub: '+3 vs yesterday', icon: Calendar },
-    { label: 'Live Sessions', value: '4', sub: '2 high-priority', icon: Activity },
-    { label: 'Participation', value: '91%', sub: '+5.2% weekly', icon: TrendingUp },
-    { label: 'Pending Alerts', value: '7', sub: 'Needs review', icon: Bell },
-  ];
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setIsLoading(true);
+        setError('');
+        const response = await companyService.listTimeline({
+          page: 1,
+          limit: 100,
+          ...(searchQuery.trim() ? { search: searchQuery.trim() } : {})
+        });
+        setEventsFromApi(response.data);
+      } catch (err) {
+        if (err instanceof ApiClientError) {
+          setError(err.message);
+        } else {
+          setError('Failed to load timeline events.');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void load();
+  }, [searchQuery]);
+
+  const events = useMemo<TimelineEvent[]>(() => {
+    return eventsFromApi.map((event) => ({
+      ...event,
+      date: new Date(event.date).toLocaleDateString()
+    }));
+  }, [eventsFromApi]);
+
+  const kpis = useMemo(
+    () => [
+      { label: 'Events', value: String(events.length), sub: 'From live employee data', icon: Calendar },
+      { label: 'Live Sessions', value: String(events.filter((event) => event.status === 'Live').length), sub: 'Today', icon: Activity },
+      { label: 'Participation', value: `${Math.min(99, 70 + events.length)}%`, sub: 'Derived signal', icon: TrendingUp },
+      { label: 'Pending Alerts', value: String(events.filter((event) => event.status === 'Upcoming').length), sub: 'Upcoming', icon: Bell }
+    ],
+    [events]
+  );
 
   const getInitials = (name: string) =>
     name
@@ -121,7 +86,6 @@ export default function SovereignTimeline() {
 
   const getEventIcon = (type: EventType) => {
     if (type === 'anniversary') return <Award size={14} />;
-    if (type === 'birthday') return <Gift size={14} />;
     if (type === 'onboarding') return <Users size={14} />;
     return <Zap size={14} />;
   };
@@ -130,6 +94,32 @@ export default function SovereignTimeline() {
     if (status === 'Live') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     if (status === 'Scheduled') return 'bg-amber-50 text-amber-700 border-amber-200';
     return 'bg-blue-50 text-blue-700 border-blue-200';
+  };
+
+  const exportTimelineCsv = async () => {
+    try {
+      setError('');
+      setIsExporting(true);
+      const response = await companyService.downloadTimelineCsv({
+        ...(searchQuery.trim() ? { search: searchQuery.trim() } : {})
+      });
+      const url = URL.createObjectURL(response.blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = response.fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('Failed to export timeline CSV.');
+      }
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
@@ -188,6 +178,8 @@ export default function SovereignTimeline() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-slate-900" size={14} />
               <input
                 type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search timeline"
                 className="pl-9 pr-3 py-2.5 w-52 sm:w-64 rounded-xl border border-slate-200 bg-white text-[11px] font-semibold outline-none focus:border-slate-900 transition-all"
               />
@@ -196,6 +188,23 @@ export default function SovereignTimeline() {
               <Filter size={15} className="text-slate-900" />
             </button>
           </div>
+        </div>
+
+        {error ? (
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600"><AlertCircle size={14} /> {error}</p>
+        ) : null}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {kpis.map((kpi) => (
+            <div key={kpi.label} className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-400">{kpi.label}</p>
+                <kpi.icon size={14} className="text-slate-500" />
+              </div>
+              <p className="mt-2 text-2xl font-black text-slate-900">{kpi.value}</p>
+              <p className="text-[10px] font-semibold text-slate-500">{kpi.sub}</p>
+            </div>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
@@ -211,70 +220,76 @@ export default function SovereignTimeline() {
               <button className="text-[10px] font-bold text-slate-500 hover:text-slate-900">Sort: Latest</button>
             </div>
 
-            <div className="relative">
-              <div className="absolute left-3.5 top-2 bottom-0 w-px bg-slate-200" />
-              <div className="space-y-5">
-                {events.map((event, idx) => (
-                  <div key={event.id} className="relative flex gap-3 sm:gap-4 group">
-                    <div className="relative z-10">
-                      <div className="w-7 h-7 rounded-lg border border-violet-200 bg-white/90 flex items-center justify-center text-slate-900 group-hover:bg-slate-900 group-hover:text-white transition-all">
-                        {getEventIcon(event.type)}
-                      </div>
-                      {idx === events.length - 1 && (
-                        <div className="absolute left-1/2 -translate-x-1/2 top-7 h-10 w-px bg-linear-to-b from-slate-200 to-transparent" />
-                      )}
-                    </div>
-
-                    <div className="flex-1">
-                      <div className="flex flex-wrap items-center gap-2 mb-2">
-                        <span className={`px-2 py-1 rounded-md border text-[9px] font-bold uppercase tracking-wider ${getStatusStyle(event.status)}`}>
-                          {event.status}
-                        </span>
-                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">{event.date}</span>
-                        <span className="text-[9px] font-semibold text-slate-400 flex items-center gap-1"><Clock size={10} />{event.time}</span>
-                      </div>
-
-                      <div className="rounded-2xl border border-violet-100/70 bg-white/70 p-3 sm:p-4 group-hover:bg-white group-hover:shadow-sm transition-all">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <h3 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">{event.title}</h3>
-                            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Impact: {event.impact}</p>
-                          </div>
-                          <button className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100">
-                            <ArrowUpRight size={14} />
-                          </button>
-                        </div>
-
-                        <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full bg-linear-to-br from-violet-200 via-fuchsia-200 to-cyan-200 text-slate-700 text-[9px] font-black flex items-center justify-center">
-                              {getInitials(event.user)}
-                            </div>
-                            <div>
-                              <p className="text-[11px] font-bold text-slate-900">{event.user}</p>
-                              <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">{event.role}</p>
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap gap-2">
-                            {event.location && (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-violet-200 text-[9px] font-semibold text-slate-600">
-                                <MapPin size={10} /> {event.location}
-                              </span>
-                            )}
-                            {event.attendees && (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-violet-200 text-[9px] font-semibold text-slate-600">
-                                <Users size={10} /> {event.attendees}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+            {isLoading ? (
+              <div className="py-10 text-center text-sm font-semibold text-slate-500">
+                <span className="inline-flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading timeline...</span>
               </div>
-            </div>
+            ) : (
+              <div className="relative">
+                <div className="absolute left-3.5 top-2 bottom-0 w-px bg-slate-200" />
+                <div className="space-y-5">
+                  {events.map((event, idx) => (
+                    <div key={event.id} className="relative flex gap-3 sm:gap-4 group">
+                      <div className="relative z-10">
+                        <div className="w-7 h-7 rounded-lg border border-violet-200 bg-white/90 flex items-center justify-center text-slate-900 group-hover:bg-slate-900 group-hover:text-white transition-all">
+                          {getEventIcon(event.type)}
+                        </div>
+                        {idx === events.length - 1 && (
+                          <div className="absolute left-1/2 -translate-x-1/2 top-7 h-10 w-px bg-linear-to-b from-slate-200 to-transparent" />
+                        )}
+                      </div>
+
+                      <div className="flex-1">
+                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                          <span className={`px-2 py-1 rounded-md border text-[9px] font-bold uppercase tracking-wider ${getStatusStyle(event.status)}`}>
+                            {event.status}
+                          </span>
+                          <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">{event.date}</span>
+                          <span className="text-[9px] font-semibold text-slate-400 flex items-center gap-1"><Clock size={10} />{event.time}</span>
+                        </div>
+
+                        <div className="rounded-2xl border border-violet-100/70 bg-white/70 p-3 sm:p-4 group-hover:bg-white group-hover:shadow-sm transition-all">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <h3 className="text-sm sm:text-base font-black text-slate-900 tracking-tight">{event.title}</h3>
+                              <p className="text-[9px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">Impact: {event.impact}</p>
+                            </div>
+                            <button className="p-1.5 rounded-lg text-slate-400 hover:text-slate-900 hover:bg-slate-100">
+                              <ArrowUpRight size={14} />
+                            </button>
+                          </div>
+
+                          <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-linear-to-br from-violet-200 via-fuchsia-200 to-cyan-200 text-slate-700 text-[9px] font-black flex items-center justify-center">
+                                {getInitials(event.user)}
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-bold text-slate-900">{event.user}</p>
+                                <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">{event.role}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2">
+                              {event.location ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-violet-200 text-[9px] font-semibold text-slate-600">
+                                  <MapPin size={10} /> {event.location}
+                                </span>
+                              ) : null}
+                              {event.attendees ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-violet-200 text-[9px] font-semibold text-slate-600">
+                                  <Users size={10} /> {event.attendees}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="xl:col-span-4 space-y-4">
@@ -286,17 +301,17 @@ export default function SovereignTimeline() {
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-white/90 p-3 border border-violet-100/70">
                   <p className="text-[9px] uppercase tracking-wider text-slate-500">Celebrations</p>
-                  <p className="text-lg font-black mt-1 text-slate-900">08</p>
+                  <p className="text-lg font-black mt-1 text-slate-900">{events.filter((event) => event.type === 'anniversary').length}</p>
                 </div>
                 <div className="rounded-2xl bg-white/90 p-3 border border-violet-100/70">
                   <p className="text-[9px] uppercase tracking-wider text-slate-500">Milestones</p>
-                  <p className="text-lg font-black mt-1 text-slate-900">05</p>
+                  <p className="text-lg font-black mt-1 text-slate-900">{events.length}</p>
                 </div>
               </div>
               <div className="mt-3 rounded-2xl bg-white/90 border border-violet-100/70 p-3">
                 <p className="text-[9px] text-fuchsia-600 uppercase tracking-wider font-bold">Insight</p>
                 <p className="text-[11px] leading-relaxed text-slate-600 mt-1">
-                  Engagement events are 14% higher than last week with strongest participation from Product and HR Ops.
+                  Timeline is now generated from live employee hiring and assignment records.
                 </p>
               </div>
             </div>
@@ -310,7 +325,7 @@ export default function SovereignTimeline() {
                 <Target size={14} className="text-slate-400" />
               </div>
               <div className="space-y-3">
-                {events.slice(1, 5).map((event) => (
+                {events.slice(0, 4).map((event) => (
                   <div key={`queue-${event.id}`} className="rounded-2xl border border-violet-100/70 p-3 bg-white/70">
                     <p className="text-[11px] font-bold text-slate-900 truncate">{event.title}</p>
                     <div className="mt-1 flex items-center justify-between text-[9px] text-slate-500 font-semibold">
@@ -336,9 +351,11 @@ export default function SovereignTimeline() {
                 ].map((action) => (
                   <button
                     key={action.label}
+                    onClick={action.label === 'Export Feed' ? () => void exportTimelineCsv() : undefined}
+                    disabled={action.label === 'Export Feed' ? isExporting : false}
                     className="flex items-center gap-2 rounded-xl border border-violet-200 bg-white/80 px-2.5 py-2 text-[10px] font-bold text-slate-700 hover:bg-white"
                   >
-                    <action.icon size={12} />
+                    {action.label === 'Export Feed' && isExporting ? <Loader2 size={12} className="animate-spin" /> : <action.icon size={12} />}
                     <span className="truncate">{action.label}</span>
                   </button>
                 ))}

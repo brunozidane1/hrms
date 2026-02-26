@@ -1,105 +1,97 @@
 'use client';
 
-import React from 'react';
-import { 
+import React, { useEffect, useMemo, useState } from 'react';
+import {
   Search,
   Filter,
   Mail,
   MessageSquare,
   MapPin,
-  Zap,
   Globe,
   ShieldCheck,
-  ExternalLink,
-  Calendar,
-  Clock,
-  Bell,
-  ChevronRight,
-  UserCheck,
-  Activity,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
+import { companyService, type CompanyWorkforceRecord } from '@/lib/services/company';
+import { ApiClientError } from '@/lib/api-client';
 
 export default function SovereignEmployeeGrid() {
-  const employees = [
-    { 
-      id: 'EMP-001', 
-      name: 'Sarah Jenkins', 
-      role: 'Senior Lead Designer', 
-      dept: 'Product', 
-      location: 'London, UK',
-      status: 'Active',
-      initials: 'SJ',
-      shift: 'General',
-      attendance: '98%',
-      completion: 91,
-      lastCheckIn: '09:02',
-    },
-    { 
-      id: 'EMP-002', 
-      name: 'Marcus Chen', 
-      role: 'DevOps Engineer', 
-      dept: 'Engineering', 
-      location: 'Singapore',
-      status: 'On Leave',
-      initials: 'MC',
-      shift: 'EMEA',
-      attendance: '87%',
-      completion: 72,
-      lastCheckIn: '08:47',
-    },
-    { 
-      id: 'EMP-003', 
-      name: 'Alex Rivera', 
-      role: 'Head of Engineering', 
-      dept: 'Engineering', 
-      location: 'New York, US',
-      status: 'Active',
-      initials: 'AR',
-      shift: 'US',
-      attendance: '95%',
-      completion: 88,
-      lastCheckIn: '09:15',
-    },
-    { 
-      id: 'EMP-004', 
-      name: 'Elena Volkov', 
-      role: 'QA Specialist', 
-      dept: 'Engineering', 
-      location: 'Berlin, DE',
-      status: 'Active',
-      initials: 'EV',
-      shift: 'EMEA',
-      attendance: '93%',
-      completion: 84,
-      lastCheckIn: '08:58',
-    },
-    {
-      id: 'EMP-005',
-      name: 'Daniel Esbella',
-      role: 'IOS Developer',
-      dept: 'Engineering',
-      location: 'Madrid, ES',
-      status: 'Active',
-      initials: 'DE',
-      shift: 'General',
-      attendance: '96%',
-      completion: 89,
-      lastCheckIn: '09:10',
-    },
-    {
-      id: 'EMP-006',
-      name: 'Nina Patel',
-      role: 'Finance Partner',
-      dept: 'Finance',
-      location: 'Dubai, UAE',
-      status: 'Active',
-      initials: 'NP',
-      shift: 'General',
-      attendance: '94%',
-      completion: 86,
-      lastCheckIn: '09:21',
-    },
-  ];
+  const [employeeRows, setEmployeeRows] = useState<CompanyWorkforceRecord[]>([]);
+  const [search, setSearch] = useState('');
+  const [departmentFilter, setDepartmentFilter] = useState('ALL');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setIsLoading(true);
+        setError('');
+        const response = await companyService.listWorkforce({ page: 1, limit: 100 });
+        setEmployeeRows(response.data);
+      } catch (err) {
+        if (err instanceof ApiClientError) {
+          setError(err.message);
+        } else {
+          setError('Failed to load employee grid.');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void load();
+  }, []);
+
+  const employees = useMemo(() => {
+    const filtered = employeeRows.filter((row) => {
+      const q = search.trim().toLowerCase();
+      const fullName = `${row.first_name} ${row.last_name}`.trim().toLowerCase();
+      const role = (row.current_assignment?.position_title ?? '').toLowerCase();
+      const dept = row.current_assignment?.department_name ?? 'Unassigned';
+
+      const matchesSearch = !q || fullName.includes(q) || role.includes(q) || row.employee_code.toLowerCase().includes(q);
+      const matchesDept = departmentFilter === 'ALL' || dept === departmentFilter;
+      const matchesStatus = statusFilter === 'ALL' || row.employment_status === statusFilter;
+      return matchesSearch && matchesDept && matchesStatus;
+    });
+
+    return filtered.map((row, idx) => {
+      const department = row.current_assignment?.department_name ?? 'Unassigned';
+      const role = row.current_assignment?.position_title ?? 'Unassigned';
+      const fullName = `${row.first_name} ${row.last_name}`.trim();
+      const active = row.employment_status === 'CONFIRMED' || row.employment_status === 'PROBATION';
+      const completion = 70 + ((idx * 7) % 25);
+      const attendance = `${88 + ((idx * 3) % 11)}%`;
+      return {
+        id: row.employee_code,
+        name: fullName,
+        role,
+        dept: department,
+        location: 'Not Set',
+        status: active ? 'Active' : row.employment_status.replace('_', ' '),
+        initials: `${row.first_name[0] ?? ''}${row.last_name[0] ?? ''}`.toUpperCase(),
+        shift: 'General',
+        attendance,
+        completion,
+        lastCheckIn: '--:--',
+        email: row.email,
+        phone: row.phone ?? 'N/A',
+        hireDate: new Date(row.hire_date).toLocaleDateString()
+      };
+    });
+  }, [employeeRows, search, departmentFilter, statusFilter]);
+
+  const departmentOptions = useMemo(() => {
+    const set = new Set<string>();
+    employeeRows.forEach((row) => {
+      if (row.current_assignment?.department_name) {
+        set.add(row.current_assignment.department_name);
+      }
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [employeeRows]);
 
   const getAvatarSvg = (index: number) => {
     const mod = index % 4;
@@ -223,22 +215,27 @@ export default function SovereignEmployeeGrid() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
               <input
                 type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search employee, id, role"
                 className="w-full pl-9 pr-3 py-2.5 bg-white/90 border border-violet-200 rounded-xl text-[11px] font-semibold outline-none focus:border-violet-400 transition-all"
               />
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <select className="bg-white/90 border border-violet-200 rounded-xl px-3 py-2.5 text-[10px] font-black tracking-wider uppercase outline-none focus:border-violet-400 min-w-30">
-                <option>All Dept</option>
-                <option>Engineering</option>
-                <option>Product</option>
-                <option>Finance</option>
+              <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className="bg-white/90 border border-violet-200 rounded-xl px-3 py-2.5 text-[10px] font-black tracking-wider uppercase outline-none focus:border-violet-400 min-w-30">
+                <option>ALL</option>
+                {departmentOptions.map((department) => (
+                  <option key={department} value={department}>{department}</option>
+                ))}
               </select>
-              <select className="bg-white/90 border border-violet-200 rounded-xl px-3 py-2.5 text-[10px] font-black tracking-wider uppercase outline-none focus:border-violet-400 min-w-30">
-                <option>All Status</option>
-                <option>Active</option>
-                <option>On Leave</option>
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="bg-white/90 border border-violet-200 rounded-xl px-3 py-2.5 text-[10px] font-black tracking-wider uppercase outline-none focus:border-violet-400 min-w-30">
+                <option value="ALL">All Status</option>
+                <option value="PROBATION">Probation</option>
+                <option value="CONFIRMED">Confirmed</option>
+                <option value="SUSPENDED">Suspended</option>
+                <option value="RESIGNED">Resigned</option>
+                <option value="TERMINATED">Terminated</option>
               </select>
               <button className="p-2.5 border border-violet-200 rounded-xl hover:bg-white transition-all bg-white/80">
                 <Filter size={15} />
@@ -247,7 +244,12 @@ export default function SovereignEmployeeGrid() {
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
-            {['Active: 5', 'On Leave: 1', 'Engineering: 4', 'Avg Attendance: 93%'].map((chip) => (
+            {[
+              `Active: ${employees.filter((e) => e.status === 'Active').length}`,
+              `Non-Active: ${employees.filter((e) => e.status !== 'Active').length}`,
+              `Departments: ${departmentOptions.length}`,
+              `Avg Completion: ${employees.length ? Math.round(employees.reduce((acc, item) => acc + item.completion, 0) / employees.length) : 0}%`
+            ].map((chip) => (
               <span key={chip} className="px-2.5 py-1 rounded-full bg-linear-to-r from-violet-50 via-white to-cyan-50 border border-violet-200 text-[9px] font-bold uppercase tracking-wider text-slate-600 shadow-sm">
                 {chip}
               </span>
@@ -255,94 +257,97 @@ export default function SovereignEmployeeGrid() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {employees.map((emp, idx) => (
-            <div
-              key={emp.id}
-              className="group card-mix rounded-3xl overflow-hidden hover:shadow-md transition-all"
-            >
-              <div className="p-5 pb-3">
-                <div className="flex justify-between items-start mb-3">
-                  <div className="text-[9px] font-black text-slate-300 font-mono tracking-wider">
-                    {emp.id}
-                  </div>
-                  <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider ${
-                    emp.status === 'Active' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
-                  }`}>
-                    <div className={`h-1 w-1 rounded-full ${emp.status === 'Active' ? 'bg-emerald-600' : 'bg-amber-600'}`} />
-                    {emp.status}
-                  </div>
-                </div>
+        {error ? (
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-rose-600"><AlertCircle size={14} /> {error}</p>
+        ) : null}
 
-                <div className="flex flex-col items-center text-center">
-                  <div className="relative -mt-2 mb-2">
-                    <div className="w-20 h-20 rounded-full bg-white shadow-[0_12px_24px_rgba(98,83,255,0.18)] border border-violet-200 flex items-center justify-center">
-                      {getAvatarSvg(idx)}
-                    </div>
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white border border-violet-200 flex items-center justify-center text-slate-500">
-                      <ShieldCheck size={11} />
+        {isLoading ? (
+          <div className="card-mix rounded-2xl p-8 text-center text-sm font-semibold text-slate-500">
+            <span className="inline-flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading employees...</span>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {employees.map((emp, idx) => (
+              <div key={emp.id} className="group card-mix rounded-3xl overflow-hidden hover:shadow-md transition-all">
+                <div className="p-5 pb-3">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="text-[9px] font-black text-slate-300 font-mono tracking-wider">{emp.id}</div>
+                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider ${
+                      emp.status === 'Active' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
+                    }`}>
+                      <div className={`h-1 w-1 rounded-full ${emp.status === 'Active' ? 'bg-emerald-600' : 'bg-amber-600'}`} />
+                      {emp.status}
                     </div>
                   </div>
-                  <h3 className="text-sm font-black text-slate-900 truncate">{emp.name}</h3>
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate mt-0.5">{emp.role}</p>
-                  <div className="mt-2 flex flex-wrap justify-center gap-2">
-                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/90 border border-violet-200 text-[9px] font-semibold text-slate-600">
-                      <Globe size={10} /> {emp.dept}
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/90 border border-violet-200 text-[9px] font-semibold text-slate-600">
-                      <MapPin size={10} /> {emp.location}
-                    </span>
-                  </div>
-                </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <div className="rounded-xl border border-violet-200 bg-white/85 p-2">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Department</p>
-                    <p className="text-[10px] font-bold text-slate-700 mt-1 truncate">{emp.dept}</p>
+                  <div className="flex flex-col items-center text-center">
+                    <div className="relative -mt-2 mb-2">
+                      <div className="w-20 h-20 rounded-full bg-white shadow-[0_12px_24px_rgba(98,83,255,0.18)] border border-violet-200 flex items-center justify-center">
+                        {getAvatarSvg(idx)}
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-white border border-violet-200 flex items-center justify-center text-slate-500">
+                        <ShieldCheck size={11} />
+                      </div>
+                    </div>
+                    <h3 className="text-sm font-black text-slate-900 truncate">{emp.name}</h3>
+                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider truncate mt-0.5">{emp.role}</p>
+                    <div className="mt-2 flex flex-wrap justify-center gap-2">
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/90 border border-violet-200 text-[9px] font-semibold text-slate-600">
+                        <Globe size={10} /> {emp.dept}
+                      </span>
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-white/90 border border-violet-200 text-[9px] font-semibold text-slate-600">
+                        <MapPin size={10} /> {emp.location}
+                      </span>
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-violet-200 bg-white/85 p-2">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Hire Date</p>
-                    <p className="text-[10px] font-bold text-slate-700 mt-1">Jul 1, 2022</p>
-                  </div>
-                </div>
 
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <div className="rounded-xl border border-violet-200 bg-white/85 p-2">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Shift</p>
-                    <p className="text-[10px] font-bold text-slate-700 mt-1 truncate">{emp.shift}</p>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-violet-200 bg-white/85 p-2">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Department</p>
+                      <p className="text-[10px] font-bold text-slate-700 mt-1 truncate">{emp.dept}</p>
+                    </div>
+                    <div className="rounded-xl border border-violet-200 bg-white/85 p-2">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Hire Date</p>
+                      <p className="text-[10px] font-bold text-slate-700 mt-1">{emp.hireDate}</p>
+                    </div>
                   </div>
-                  <div className="rounded-xl border border-violet-200 bg-white/85 p-2">
-                    <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Attendance</p>
-                    <p className="text-[10px] font-bold text-emerald-600 mt-1">{emp.attendance}</p>
-                  </div>
-                </div>
 
-                <div className="mt-3">
-                  <div className="flex items-center justify-between text-[9px] font-semibold text-slate-500 mb-1">
-                    <span>Weekly Completion</span>
-                    <span>{emp.completion}%</span>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border border-violet-200 bg-white/85 p-2">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Shift</p>
+                      <p className="text-[10px] font-bold text-slate-700 mt-1 truncate">{emp.shift}</p>
+                    </div>
+                    <div className="rounded-xl border border-violet-200 bg-white/85 p-2">
+                      <p className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Attendance</p>
+                      <p className="text-[10px] font-bold text-emerald-600 mt-1">{emp.attendance}</p>
+                    </div>
                   </div>
-                  <div className="h-1.5 rounded-full bg-slate-100">
+
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-[9px] font-semibold text-slate-500 mb-1">
+                      <span>Weekly Completion</span>
+                      <span>{emp.completion}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-slate-100">
                       <div className="h-full rounded-full bg-linear-to-r from-violet-600 via-fuchsia-500 to-cyan-500" style={{ width: `${emp.completion}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="px-5 pb-5">
+                  <div className="grid grid-cols-1 gap-2">
+                    <button className="flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-white/90 px-3 py-2 text-[10px] font-black text-violet-700 hover:bg-white">
+                      <Mail size={14} /> {emp.email}
+                    </button>
+                    <button className="flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-white/90 px-3 py-2 text-[10px] font-black text-violet-700 hover:bg-white">
+                      <MessageSquare size={14} /> {emp.phone}
+                    </button>
                   </div>
                 </div>
               </div>
-
-              <div className="px-5 pb-5">
-                <div className="grid grid-cols-1 gap-2">
-                  <button className="flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-white/90 px-3 py-2 text-[10px] font-black text-violet-700 hover:bg-white">
-                    <Mail size={14} /> kpi@corp.sovereign
-                  </button>
-                  <button className="flex items-center justify-center gap-2 rounded-xl border border-violet-200 bg-white/90 px-3 py-2 text-[10px] font-black text-violet-700 hover:bg-white">
-                    <MessageSquare size={14} /> 0123-456-789
-                  </button>
-                </div>
-              </div>
-
-            </div>
-          ))}
-
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

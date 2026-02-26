@@ -1,180 +1,163 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, Search, CheckCircle, Clock, AlertTriangle, DollarSign, TrendingUp, PieChart } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertCircle, CheckCircle, Clock, Loader2, Plus, Search } from 'lucide-react';
+import { ApiClientError } from '@/lib/api-client';
+import { payrollService, type PayrollLoanRecord } from '@/lib/services/payroll';
+import { employeesService, type Employee } from '@/lib/services/employees';
+
+const money = (value: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
 
 export default function LoansPage() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [loans, setLoans] = useState<PayrollLoanRecord[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [form, setForm] = useState({ employeeId: '', loanType: '', principalAmount: '', disbursedAmount: '', interestRate: '', tenureMonths: '', monthlyEmi: '', sanctionedDate: '', notes: '' });
 
-  const loans = [
-    {
-      id: 1,
-      employeeName: 'John Doe',
-      employeeId: 'EMP001',
-      department: 'Engineering',
-      loanType: 'Personal Loan',
-      amount: 100000,
-      principalAmount: 100000,
-      sanctionedDate: '2024-06-15',
-      repaymentTenure: '36 months',
-      monthlyEmi: 2941,
-      interestRate: '8.5%',
-      disbursedAmount: 95000,
-      remainingBalance: 62000,
-      status: 'Active',
-      emiPaid: 12,
-    },
-    {
-      id: 2,
-      employeeName: 'Sarah Johnson',
-      employeeId: 'EMP002',
-      department: 'Product',
-      loanType: 'Home Loan',
-      amount: 500000,
-      principalAmount: 500000,
-      sanctionedDate: '2023-01-20',
-      repaymentTenure: '120 months',
-      monthlyEmi: 5292,
-      interestRate: '7.2%',
-      disbursedAmount: 500000,
-      remainingBalance: 420000,
-      status: 'Active',
-      emiPaid: 24,
-    },
-    {
-      id: 3,
-      employeeName: 'Michael Chen',
-      employeeId: 'EMP003',
-      department: 'Marketing',
-      loanType: 'Educational Loan',
-      amount: 150000,
-      principalAmount: 150000,
-      sanctionedDate: '2022-09-10',
-      repaymentTenure: '60 months',
-      monthlyEmi: 2750,
-      interestRate: '6.5%',
-      disbursedAmount: 150000,
-      remainingBalance: 25000,
-      status: 'Active',
-      emiPaid: 47,
-    },
-    {
-      id: 4,
-      employeeName: 'Emily Rodriguez',
-      employeeId: 'EMP004',
-      department: 'Design',
-      loanType: 'Personal Loan',
-      amount: 50000,
-      principalAmount: 50000,
-      sanctionedDate: '2021-12-01',
-      repaymentTenure: '24 months',
-      monthlyEmi: 2217,
-      interestRate: '9%',
-      disbursedAmount: 50000,
-      remainingBalance: 0,
-      status: 'Closed',
-      emiPaid: 24,
-    },
-  ];
-
-  const getStatusColor = (status: string) => {
-    return status === 'Active'
-      ? 'bg-blue-50 text-blue-700 border-blue-200'
-      : 'bg-green-50 text-green-700 border-green-200';
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+      const [loansResponse, employeesResponse] = await Promise.all([
+        payrollService.listLoans({ page: 1, limit: 100 }),
+        employeesService.list({ page: 1, limit: 100 })
+      ]);
+      setLoans(loansResponse.data);
+      const activeEmployees = employeesResponse.data.filter((employee) => employee.is_active);
+      setEmployees(activeEmployees);
+      if (activeEmployees[0]) {
+        setForm((current) => ({ ...current, employeeId: current.employeeId || activeEmployees[0].id }));
+      }
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setError(err.message);
+      } else {
+        setError('Failed to load loans data.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const totalLoans = loans.filter(l => l.status === 'Active').length;
-  const totalDisbursed = loans.reduce((sum, l) => sum + l.disbursedAmount, 0);
-  const totalOutstanding = loans.reduce((sum, l) => sum + l.remainingBalance, 0);
-  const averageEmi = (loans.reduce((sum, l) => sum + l.monthlyEmi, 0) / loans.length).toFixed(0);
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return loans;
+    return loans.filter((loan) => {
+      const name = `${loan.employee.first_name} ${loan.employee.last_name}`.toLowerCase();
+      return name.includes(q) || loan.employee.employee_code.toLowerCase().includes(q) || loan.loan_type.toLowerCase().includes(q);
+    });
+  }, [loans, searchQuery]);
+
+  const createLoan = async () => {
+    setError('');
+    setSuccess('');
+
+    const principalAmount = Number(form.principalAmount);
+    const disbursedAmount = form.disbursedAmount.trim() ? Number(form.disbursedAmount) : undefined;
+    const interestRate = Number(form.interestRate);
+    const tenureMonths = Number(form.tenureMonths);
+    const monthlyEmi = form.monthlyEmi.trim() ? Number(form.monthlyEmi) : undefined;
+
+    if (!form.employeeId || !form.loanType.trim() || !form.principalAmount.trim() || !form.interestRate.trim() || !form.tenureMonths.trim() || !form.sanctionedDate.trim()) {
+      setError('Employee, loan type, principal amount, interest rate, tenure, and sanctioned date are required.');
+      return;
+    }
+
+    if (!Number.isFinite(principalAmount) || principalAmount <= 0 || !Number.isFinite(interestRate) || interestRate < 0 || !Number.isFinite(tenureMonths) || tenureMonths <= 0) {
+      setError('Please provide valid numeric values for amount/rate/tenure.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await payrollService.createLoan({
+        employee_id: form.employeeId,
+        loan_type: form.loanType.trim(),
+        principal_amount: principalAmount,
+        ...(disbursedAmount !== undefined ? { disbursed_amount: disbursedAmount } : {}),
+        interest_rate: interestRate,
+        tenure_months: tenureMonths,
+        ...(monthlyEmi !== undefined ? { monthly_emi: monthlyEmi } : {}),
+        sanctioned_date: new Date(form.sanctionedDate).toISOString(),
+        ...(form.notes.trim() ? { notes: form.notes.trim() } : {})
+      });
+      setSuccess('Loan created successfully.');
+      setForm((current) => ({ ...current, loanType: '', principalAmount: '', disbursedAmount: '', interestRate: '', tenureMonths: '', monthlyEmi: '', sanctionedDate: '', notes: '' }));
+      await loadData();
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setError(err.message);
+      } else {
+        setError('Failed to create loan.');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const updateLoanStatus = async (loanId: string, status: 'ACTIVE' | 'CLOSED' | 'REJECTED') => {
+    setError('');
+    setSuccess('');
+    try {
+      await payrollService.updateLoanStatus(loanId, { status, ...(status === 'CLOSED' ? { outstanding_amount: 0 } : {}) });
+      setSuccess(`Loan marked as ${status.toLowerCase()}.`);
+      await loadData();
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setError(err.message);
+      } else {
+        setError('Failed to update loan status.');
+      }
+    }
+  };
 
   return (
-    <div className="fun-page p-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Loan Management</h1>
-          <p className="text-gray-600 mt-1">Manage employee loans and EMI tracking</p>
+    <div className="p-8 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-gray-900">Loan Management</h1>
+        <p className="text-gray-600 mt-1">Manage employee loans and outstanding balances.</p>
+      </div>
+
+      {error ? <p className="inline-flex items-center gap-2 text-sm text-rose-600"><AlertCircle size={16} /> {error}</p> : null}
+      {success ? <p className="inline-flex items-center gap-2 text-sm text-emerald-600"><CheckCircle size={16} /> {success}</p> : null}
+
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm space-y-4">
+        <h2 className="text-lg font-bold text-gray-900">Create Loan</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <select value={form.employeeId} onChange={(e) => setForm((c) => ({ ...c, employeeId: e.target.value }))} className="px-4 py-3 border border-gray-300 rounded-xl outline-none">
+            <option value="">Select employee</option>
+            {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.first_name} {employee.last_name} ({employee.employee_code})</option>)}
+          </select>
+          <input value={form.loanType} onChange={(e) => setForm((c) => ({ ...c, loanType: e.target.value }))} placeholder="Loan type" className="px-4 py-3 border border-gray-300 rounded-xl outline-none" />
+          <input type="number" value={form.principalAmount} onChange={(e) => setForm((c) => ({ ...c, principalAmount: e.target.value }))} placeholder="Principal amount" className="px-4 py-3 border border-gray-300 rounded-xl outline-none" />
+          <input type="number" value={form.disbursedAmount} onChange={(e) => setForm((c) => ({ ...c, disbursedAmount: e.target.value }))} placeholder="Disbursed amount (optional)" className="px-4 py-3 border border-gray-300 rounded-xl outline-none" />
+          <input type="number" value={form.interestRate} onChange={(e) => setForm((c) => ({ ...c, interestRate: e.target.value }))} placeholder="Interest rate (%)" className="px-4 py-3 border border-gray-300 rounded-xl outline-none" />
+          <input type="number" value={form.tenureMonths} onChange={(e) => setForm((c) => ({ ...c, tenureMonths: e.target.value }))} placeholder="Tenure (months)" className="px-4 py-3 border border-gray-300 rounded-xl outline-none" />
+          <input type="number" value={form.monthlyEmi} onChange={(e) => setForm((c) => ({ ...c, monthlyEmi: e.target.value }))} placeholder="Monthly EMI (optional)" className="px-4 py-3 border border-gray-300 rounded-xl outline-none" />
+          <input type="date" value={form.sanctionedDate} onChange={(e) => setForm((c) => ({ ...c, sanctionedDate: e.target.value }))} className="px-4 py-3 border border-gray-300 rounded-xl outline-none" />
+          <input value={form.notes} onChange={(e) => setForm((c) => ({ ...c, notes: e.target.value }))} placeholder="Notes (optional)" className="px-4 py-3 border border-gray-300 rounded-xl outline-none" />
         </div>
-        <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition font-semibold shadow-lg shadow-blue-200">
-          <Plus size={20} />
-          New Loan Application
+        <button onClick={() => void createLoan()} disabled={isSubmitting} className="inline-flex items-center gap-2 px-5 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-60">
+          {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Create Loan
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-8">
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Active Loans</p>
-            <DollarSign className="w-5 h-5 text-blue-600" />
-          </div>
-          <p className="text-3xl font-bold text-blue-600">{totalLoans}</p>
-          <p className="text-xs text-gray-500 mt-2">Running</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Total Disbursed</p>
-            <TrendingUp className="w-5 h-5 text-green-600" />
-          </div>
-          <p className="text-3xl font-bold text-green-600">${(totalDisbursed / 100000).toFixed(0)}L</p>
-          <p className="text-xs text-gray-500 mt-2">All loans</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Outstanding Balance</p>
-            <AlertTriangle className="w-5 h-5 text-orange-600" />
-          </div>
-          <p className="text-3xl font-bold text-orange-600">${(totalOutstanding / 100000).toFixed(0)}L</p>
-          <p className="text-xs text-gray-500 mt-2">Pending recovery</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Avg. EMI</p>
-            <PieChart className="w-5 h-5 text-purple-600" />
-          </div>
-          <p className="text-3xl font-bold text-purple-600">${averageEmi}</p>
-          <p className="text-xs text-gray-500 mt-2">Monthly average</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Loan Types</p>
-            <Clock className="w-5 h-5 text-indigo-600" />
-          </div>
-          <p className="text-3xl font-bold text-indigo-600">4</p>
-          <p className="text-xs text-gray-500 mt-2">Categories</p>
+      <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input type="text" placeholder="Search by employee or loan type..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl outline-none" />
         </div>
       </div>
 
-      {/* Search and Filters */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6 shadow-sm">
-        <div className="flex flex-col md:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search by employee name or ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
-            />
-          </div>
-          <select className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-            <option>All Loan Types</option>
-            <option>Personal Loan</option>
-            <option>Home Loan</option>
-            <option>Educational Loan</option>
-            <option>Auto Loan</option>
-          </select>
-          <select className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-            <option>All Status</option>
-            <option>Active</option>
-            <option>Closed</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Loans Table */}
       <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -182,45 +165,45 @@ export default function LoansPage() {
               <tr>
                 <th className="text-left px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">Employee</th>
                 <th className="text-left px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">Loan Type</th>
-                <th className="text-right px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">Amount</th>
-                <th className="text-right px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">Monthly EMI</th>
+                <th className="text-right px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">Principal</th>
                 <th className="text-right px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">Outstanding</th>
-                <th className="text-left px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">EMI Paid</th>
+                <th className="text-right px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">EMI</th>
                 <th className="text-left px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">Status</th>
+                <th className="text-left px-6 py-4 text-xs font-bold text-gray-600 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {loans.map((loan) => (
-                <tr key={loan.id} className="hover:bg-gray-50 transition">
-                  <td className="px-6 py-4">
-                    <div>
-                      <p className="font-semibold text-gray-900">{loan.employeeName}</p>
-                      <p className="text-sm text-gray-500">{loan.employeeId}</p>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-sm font-medium text-gray-700">{loan.loanType}</span>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <p className="text-sm font-semibold text-gray-900">${loan.amount.toLocaleString()}</p>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <p className="text-sm font-semibold text-gray-900">${loan.monthlyEmi}</p>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <p className="text-sm font-semibold text-orange-600">${loan.remainingBalance.toLocaleString()}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm text-gray-700">{loan.emiPaid} / {parseInt(loan.repaymentTenure)}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(loan.status)}`}>
-                      {loan.status === 'Active' ? <Clock size={14} /> : <CheckCircle size={14} />}
-                      {loan.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {isLoading ? (
+                <tr><td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-500 inline-flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Loading loans...</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan={7} className="px-6 py-10 text-center text-sm text-slate-500">No loans found.</td></tr>
+              ) : (
+                filtered.map((loan) => (
+                  <tr key={loan.id} className="hover:bg-gray-50 transition">
+                    <td className="px-6 py-4">
+                      <p className="font-semibold text-gray-900">{loan.employee.first_name} {loan.employee.last_name}</p>
+                      <p className="text-sm text-gray-500">{loan.employee.employee_code}</p>
+                    </td>
+                    <td className="px-6 py-4 text-sm font-medium text-gray-700">{loan.loan_type}</td>
+                    <td className="px-6 py-4 text-right text-sm font-semibold text-gray-900">{money(Number(loan.principal_amount))}</td>
+                    <td className="px-6 py-4 text-right text-sm font-semibold text-orange-600">{money(Number(loan.outstanding_amount))}</td>
+                    <td className="px-6 py-4 text-right text-sm font-semibold text-gray-900">{money(Number(loan.monthly_emi))}</td>
+                    <td className="px-6 py-4">
+                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${loan.status === 'ACTIVE' ? 'bg-blue-50 text-blue-700 border-blue-200' : loan.status === 'CLOSED' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                        <Clock size={14} /> {loan.status}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {loan.status === 'ACTIVE' ? (
+                        <div className="flex gap-2">
+                          <button onClick={() => void updateLoanStatus(loan.id, 'CLOSED')} className="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50">Close</button>
+                          <button onClick={() => void updateLoanStatus(loan.id, 'REJECTED')} className="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg border border-rose-200 text-rose-700 hover:bg-rose-50">Reject</button>
+                        </div>
+                      ) : <span className="text-xs text-slate-400">-</span>}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

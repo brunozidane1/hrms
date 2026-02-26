@@ -5,6 +5,7 @@ import {
   Search, Bell, ChevronDown, User, 
   Settings, LogOut, Sparkles, Zap, Ghost, Pizza, Coffee
 } from 'lucide-react';
+import { useAuth } from '@/lib/auth-context';
 
 interface Notification {
   id: string;
@@ -23,6 +24,7 @@ export default function SovereignHeader({ module: _module }: { module?: string }
   
   const userMenuRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+  const { user, logout } = useAuth();
 
   const [notifications] = useState<Notification[]>([
     {
@@ -173,8 +175,10 @@ export default function SovereignHeader({ module: _module }: { module?: string }
                 />
               </div>
               <div className="hidden sm:flex flex-col items-start">
-                <span className="text-[10px] font-black text-slate-700 uppercase leading-none">John Doe</span>
-                <span className="text-[8px] font-bold text-indigo-400 uppercase tracking-tighter">The Big Cheese</span>
+                <span className="text-[10px] font-black text-slate-700 uppercase leading-none">
+                  {(user?.full_name ?? 'Guest User').toUpperCase()}
+                </span>
+                <span className="text-[8px] font-bold text-indigo-400 uppercase tracking-tighter">{user?.company_slug ?? 'NO COMPANY'}</span>
               </div>
               <ChevronDown size={14} className={`text-slate-400 transition-transform ${showUserMenu ? 'rotate-180' : ''}`} />
             </button>
@@ -189,6 +193,10 @@ export default function SovereignHeader({ module: _module }: { module?: string }
                     icon={<LogOut size={16}/>} 
                     label="Escape Hatch" 
                     variant="danger" 
+                    onClick={() => {
+                      void logout();
+                      setShowUserMenu(false);
+                    }}
                   />
                 </div>
               </div>
@@ -200,9 +208,9 @@ export default function SovereignHeader({ module: _module }: { module?: string }
   );
 }
 
-function MenuButton({ icon, label, variant = 'default' }: { icon: React.ReactNode; label: string, variant?: 'default' | 'danger' }) {
+function MenuButton({ icon, label, variant = 'default', onClick }: { icon: React.ReactNode; label: string, variant?: 'default' | 'danger'; onClick?: () => void }) {
   return (
-    <button className={`w-full flex items-center gap-4 px-4 py-3 rounded-2xl transition-all group ${
+    <button onClick={onClick} className={`w-full flex items-center gap-4 px-4 py-3 rounded-2xl transition-all group ${
       variant === 'danger' ? 'hover:bg-rose-50 text-rose-500' : 'hover:bg-indigo-50 text-slate-600 hover:text-indigo-600'
     }`}>
       <span className="group-hover:scale-110 transition-transform">{icon}</span>

@@ -1,248 +1,187 @@
 'use client';
 
-import { useState } from 'react';
-import { Plus, Search, CheckCircle, Clock, AlertCircle, User, Calendar, FileText, ClipboardCheck } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Search, CheckCircle, Clock, AlertCircle, User, Calendar, ClipboardCheck, Loader2 } from 'lucide-react';
+import { ApiClientError } from '@/lib/api-client';
+import { atsService, type OnboardingRecord } from '@/lib/services/ats';
 
 export default function OnboardingPage() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | OnboardingRecord['status']>('ALL');
+  const [records, setRecords] = useState<OnboardingRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isFinalizingOfferId, setIsFinalizingOfferId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-  const onboardingTasks = [
-    {
-      id: 1,
-      employeeName: 'Michael Chen',
-      position: 'Product Manager',
-      joiningDate: '2026-03-01',
-      department: 'Product',
-      status: 'In Progress',
-      progress: 65,
-      completedTasks: 13,
-      totalTasks: 20,
-      buddy: 'Sarah Johnson',
-      tasks: [
-        { name: 'Complete HR Forms', status: 'completed' },
-        { name: 'IT Setup', status: 'completed' },
-        { name: 'Orientation Session', status: 'in-progress' },
-        { name: 'Team Introduction', status: 'pending' },
-        { name: 'First Project Assignment', status: 'pending' },
-      ],
-    },
-    {
-      id: 2,
-      employeeName: 'Sarah Johnson',
-      position: 'Senior Software Engineer',
-      joiningDate: '2026-03-15',
-      department: 'Engineering',
-      status: 'Not Started',
-      progress: 0,
-      completedTasks: 0,
-      totalTasks: 18,
-      buddy: 'James Wilson',
-      tasks: [],
-    },
-    {
-      id: 3,
-      employeeName: 'David Martinez',
-      position: 'Data Analyst',
-      joiningDate: '2026-02-15',
-      department: 'Analytics',
-      status: 'Completed',
-      progress: 100,
-      completedTasks: 20,
-      totalTasks: 20,
-      buddy: 'Emily Rodriguez',
-      tasks: [
-        { name: 'Complete HR Forms', status: 'completed' },
-        { name: 'IT Setup', status: 'completed' },
-        { name: 'Orientation Session', status: 'completed' },
-        { name: 'Team Introduction', status: 'completed' },
-        { name: 'First Project Assignment', status: 'completed' },
-      ],
-    },
-  ];
+  const loadOnboarding = async () => {
+    try {
+      setIsLoading(true);
+      setError('');
+      setSuccess('');
+      const response = await atsService.listOnboarding({
+        page: 1,
+        limit: 100,
+        ...(statusFilter !== 'ALL' ? { status: statusFilter } : {}),
+        ...(searchQuery.trim() ? { search: searchQuery.trim() } : {})
+      });
+      setRecords(response.data);
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setError(err.message);
+      } else {
+        setError('Failed to load onboarding records.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      'In Progress': 'bg-blue-50 text-blue-700 border-blue-200',
-      'Not Started': 'bg-gray-50 text-gray-700 border-gray-200',
-      'Completed': 'bg-green-50 text-green-700 border-green-200',
-      'Delayed': 'bg-red-50 text-red-700 border-red-200',
+  useEffect(() => {
+    void loadOnboarding();
+  }, [searchQuery, statusFilter]);
+
+  const finalizePreOnboarding = async (record: OnboardingRecord) => {
+    setError('');
+    setSuccess('');
+
+    const latestOffer = record.offer_letters[0];
+    if (!latestOffer || latestOffer.status !== 'SENT') {
+      setError('No sent offer found for this candidate.');
+      return;
+    }
+
+    setIsFinalizingOfferId(latestOffer.id);
+    try {
+      const result = await atsService.acceptOffer(latestOffer.id);
+      setSuccess(`Pre-onboarding finalized. Employee created with ID: ${result.employeeId}`);
+      await loadOnboarding();
+    } catch (err) {
+      if (err instanceof ApiClientError) {
+        setError(err.message);
+      } else {
+        setError('Failed to finalize pre-onboarding.');
+      }
+    } finally {
+      setIsFinalizingOfferId(null);
+    }
+  };
+
+  const stats = useMemo(() => {
+    const hired = records.filter((record) => record.status === 'HIRED').length;
+    const offered = records.filter((record) => record.status === 'OFFERED').length;
+
+    return {
+      active: offered,
+      completed: hired,
+      startingSoon: records.length,
+      avgCompletion: records.length === 0 ? 'N/A' : `${Math.round((hired / records.length) * 100)}%`
     };
-    return colors[status] || 'bg-gray-50 text-gray-700 border-gray-200';
-  };
-
-  const getStatusIcon = (status: string) => {
-    if (status === 'Completed') return <CheckCircle size={16} />;
-    if (status === 'In Progress') return <Clock size={16} />;
-    if (status === 'Delayed') return <AlertCircle size={16} />;
-    return <FileText size={16} />;
-  };
+  }, [records]);
 
   return (
     <div className="fun-page p-8">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Onboarding</h1>
-          <p className="text-gray-600 mt-1">Track new employee onboarding progress</p>
+          <p className="text-gray-600 mt-1">Track onboarding from ATS onboarding API</p>
         </div>
-        <button className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition font-semibold shadow-lg shadow-blue-200">
-          <Plus size={20} />
-          Add New Hire
-        </button>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Active Onboarding</p>
-            <User className="w-5 h-5 text-blue-600" />
-          </div>
-          <p className="text-3xl font-bold text-gray-900">8</p>
-          <p className="text-xs text-blue-600 mt-2">Currently onboarding</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Completed</p>
-            <CheckCircle className="w-5 h-5 text-green-600" />
-          </div>
-          <p className="text-3xl font-bold text-green-600">24</p>
-          <p className="text-xs text-gray-500 mt-2">This quarter</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Starting Soon</p>
-            <Calendar className="w-5 h-5 text-purple-600" />
-          </div>
-          <p className="text-3xl font-bold text-purple-600">5</p>
-          <p className="text-xs text-gray-500 mt-2">Next 30 days</p>
-        </div>
-        <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm text-gray-600 font-medium">Avg. Completion</p>
-            <ClipboardCheck className="w-5 h-5 text-amber-600" />
-          </div>
-          <p className="text-3xl font-bold text-gray-900">12 days</p>
-          <p className="text-xs text-green-600 mt-2">↓ 2 days faster</p>
-        </div>
+        <Card label="Active Onboarding" value={stats.active.toString()} icon={<User className="w-5 h-5 text-blue-600" />} />
+        <Card label="Completed" value={stats.completed.toString()} icon={<CheckCircle className="w-5 h-5 text-green-600" />} />
+        <Card label="Starting Soon" value={stats.startingSoon.toString()} icon={<Calendar className="w-5 h-5 text-purple-600" />} />
+        <Card label="Avg. Completion" value={stats.avgCompletion} icon={<ClipboardCheck className="w-5 h-5 text-amber-600" />} />
       </div>
 
-      {/* Search */}
       <div className="bg-white border border-gray-200 rounded-2xl p-6 mb-6 shadow-sm">
         <div className="flex flex-col md:flex-row gap-4">
           <div className="flex-1 relative">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by employee name or position..."
+              placeholder="Search by name or position..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-12 pr-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
             />
           </div>
-          <select className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-            <option>All Status</option>
-            <option>Not Started</option>
-            <option>In Progress</option>
-            <option>Completed</option>
-            <option>Delayed</option>
-          </select>
-          <select className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none">
-            <option>All Departments</option>
-            <option>Engineering</option>
-            <option>Product</option>
-            <option>Marketing</option>
-            <option>Analytics</option>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as 'ALL' | OnboardingRecord['status'])}
+            className="px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
+          >
+            <option value="ALL">All Status</option>
+            <option value="OFFERED">Offered</option>
+            <option value="HIRED">Hired</option>
           </select>
         </div>
       </div>
 
-      {/* Onboarding List */}
+      {error ? <p className="mb-4 inline-flex items-center gap-2 text-sm text-rose-600"><AlertCircle size={16} /> {error}</p> : null}
+      {success ? <p className="mb-4 inline-flex items-center gap-2 text-sm text-emerald-600"><CheckCircle size={16} /> {success}</p> : null}
+
       <div className="grid grid-cols-1 gap-4">
-        {onboardingTasks.map((task) => (
-          <div key={task.id} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition">
-            <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 mb-4">
-              {/* Left Section */}
-              <div className="flex-1">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="text-lg font-bold text-gray-900 mb-1">{task.employeeName}</h3>
-                    <p className="text-sm text-gray-600">{task.position} • {task.department}</p>
-                  </div>
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(task.status)}`}>
-                    {getStatusIcon(task.status)}
-                    {task.status}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Joining Date</p>
-                    <p className="text-sm font-semibold text-gray-900 flex items-center gap-1">
-                      <Calendar size={14} className="text-blue-600" />
-                      {task.joiningDate}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Onboarding Buddy</p>
-                    <p className="text-sm font-semibold text-gray-900 flex items-center gap-1">
-                      <User size={14} className="text-purple-600" />
-                      {task.buddy}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500 mb-1">Tasks Completed</p>
-                    <p className="text-sm font-semibold text-gray-900">
-                      {task.completedTasks} / {task.totalTasks}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="mb-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs font-semibold text-gray-600">Overall Progress</p>
-                    <p className="text-xs font-bold text-blue-600">{task.progress}%</p>
-                  </div>
-                  <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div 
-                      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${task.progress}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Tasks Preview */}
-                {task.tasks.length > 0 && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-gray-600 mb-2">Recent Tasks:</p>
-                    {task.tasks.slice(0, 3).map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-sm">
-                        {item.status === 'completed' && <CheckCircle size={16} className="text-green-600" />}
-                        {item.status === 'in-progress' && <Clock size={16} className="text-blue-600" />}
-                        {item.status === 'pending' && <div className="w-4 h-4 border-2 border-gray-300 rounded-full" />}
-                        <span className={item.status === 'completed' ? 'text-gray-500 line-through' : 'text-gray-700'}>
-                          {item.name}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Right Section - Actions */}
-              <div className="flex lg:flex-col gap-2">
-                <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium text-sm whitespace-nowrap">
-                  View Details
-                </button>
-                <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition font-medium text-sm whitespace-nowrap">
-                  Update
-                </button>
-              </div>
-            </div>
+        {isLoading ? (
+          <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center text-sm text-slate-500 inline-flex items-center justify-center gap-2">
+            <Loader2 size={16} className="animate-spin" /> Loading onboarding records...
           </div>
-        ))}
+        ) : records.length === 0 ? (
+          <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center text-sm text-slate-500">No onboarding candidates found.</div>
+        ) : (
+          records.map((record) => (
+            <div key={record.id} className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">{record.first_name} {record.last_name}</h3>
+                  <p className="text-sm text-gray-600">{record.job_posting.title} | {record.job_posting.department.name}</p>
+                  <div className="mt-2 text-xs text-gray-500 inline-flex items-center gap-2">
+                    <Clock size={14} /> Last updated: {new Date(record.updated_at).toLocaleString()}
+                  </div>
+                  {record.offer_letters[0] ? (
+                    <div className="mt-2 text-xs text-gray-500">
+                      Start date: {new Date(record.offer_letters[0].start_date).toLocaleDateString()}
+                    </div>
+                  ) : null}
+                </div>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${record.status === 'HIRED' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                  {record.status === 'HIRED' ? <CheckCircle size={14} /> : <Clock size={14} />} {record.status}
+                </span>
+              </div>
+              {record.status === 'OFFERED' && record.offer_letters[0]?.status === 'SENT' ? (
+                <div className="mt-4">
+                  <button
+                    onClick={() => void finalizePreOnboarding(record)}
+                    disabled={isFinalizingOfferId === record.offer_letters[0].id}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+                  >
+                    {isFinalizingOfferId === record.offer_letters[0].id ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" /> Finalizing...
+                      </>
+                    ) : (
+                      'Finalize Pre-Onboarding'
+                    )}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
       </div>
+    </div>
+  );
+}
+
+function Card({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm text-gray-600 font-medium">{label}</p>
+        {icon}
+      </div>
+      <p className="text-3xl font-bold text-gray-900">{value}</p>
     </div>
   );
 }
